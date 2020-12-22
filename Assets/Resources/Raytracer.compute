@@ -1,0 +1,186 @@
+﻿#pragma kernel CSMain
+
+static const float PI = 3.14159265f;
+
+struct Ray {
+	float3 origin;
+	float3 direction;
+	float3 energy;
+};
+
+struct HitRecord {
+	float3 position;
+	float t;
+	float3 normal;
+	float3 albedo;
+	float3 specular;
+};
+
+struct Sphere {
+	float3 position;
+	float radius;
+	float3 albedo;
+	float3 specular;
+};
+
+RWTexture2D<float4> Result;
+
+float4x4 camToWorld;
+float4x4 camInvProj;
+
+Texture2D<float4> skyboxTex;
+SamplerState sampler_skyboxTex;
+
+float3 lightDir;
+float lightIntensity;
+
+StructuredBuffer<Sphere> spheres;
+
+float2 pixelOffset;
+
+int numTrace;
+
+Ray newRay(float3 origin, float3 direction) {
+    Ray ray;
+    ray.origin = origin;
+    ray.direction = direction;
+	ray.energy = float3(1, 1, 1);
+	
+	return ray;
+}
+
+HitRecord newHitRecord() {
+    HitRecord hit;
+    hit.position = float3(0.0f, 0.0f, 0.0f);
+    hit.t = 9999;
+	hit.normal = float3(0.0f, 0.0f, 0.0f);
+	hit.albedo = float3(0, 0, 0);
+	hit.specular = float3(0, 0, 0);
+	
+    return hit;
+}
+
+Ray newCamRay(float2 uv) {
+    // Transform the camera origin to world space
+    float3 origin = mul(camToWorld, float4(0.0f, 0.0f, 0.0f, 1.0f)).xyz;
+
+    // Invert the perspective projection of the view-space position
+    float3 direction = mul(camInvProj, float4(uv, 0.0f, 1.0f)).xyz;
+
+    // Transform the direction from camera to world space and normalize
+    direction = mul(camToWorld, float4(direction, 0.0f)).xyz;
+    direction = normalize(direction);
+
+    return newRay(origin, direction);
+}
+
+void IntersectGroundPlane(Ray ray, inout HitRecord bestHit) {
+    // Calculate distance along the ray where the ground plane is intersected
+	float t = -ray.origin.y / ray.direction.y;
+	if (t > 0 && t < bestHit.t) {
+		bestHit.t = t;
+		bestHit.position = ray.origin + t * ray.direction;
+		bestHit.normal = float3(0.0f, 1.0f, 0.0f);
+		bestHit.albedo = float3(0.8, 0.8, 0.8);
+		bestHit.specular = float3(0.6, 0.6, 0.6);
+	}
+}
+
+void IntersectSphere(Ray ray, inout HitRecord bestHit, Sphere sphere) {
+    // Calculate distance along the ray where the sphere is intersected
+	float3 d = ray.origin - sphere.position;
+	
+	float p1 = -dot(ray.direction, d);
+	float p2sqr = p1 * p1 - dot(d, d) + sphere.radius * sphere.radius;
+	if (p2sqr < 0)
+		return;
+	
+	float p2 = sqrt(p2sqr);
+	float t = p1 - p2 > 0 ? p1 - p2 : p1 + p2;
+	if (t > 0 && t < bestHit.t) {
+		bestHit.t = t;
+		bestHit.position = ray.origin + t * ray.direction;
+		bestHit.normal = normalize(bestHit.position - sphere.position);
+		bestHit.albedo = sphere.albedo;
+		bestHit.specular = sphere.specular;
+	}
+}
+
+HitRecord Trace(Ray ray) {
+	HitRecord bestHit = newHitRecord();
+	
+	// Check plane intersection
+	IntersectGroundPlane(ray, bestHit);
+	
+	// Check spheres intersection
+	uint numSpheres, stride;
+	spheres.GetDimensions(numSpheres, stride);
+	
+	for (int i = 0; i < numSpheres; i++)
+		IntersectSphere(ray, bestHit, spheres[i]);
+	
+		//for (int x = 0; x < 10; x += 2) {
+		//	for (int z = 0; z < 10; z += 2) {
+		//		IntersectSphere(ray, bestHit, float4(x, 1, z, 1.0f));
+		//	}
+		//}
+	
+	//IntersectSphere(ray, bestHit, float4(0, 3.0f, 0, 1.0f));
+	
+	return bestHit;
+}
+
+float3 Shade(inout Ray ray, HitRecord hit) {
+	if (hit.t < 9999) {
+		// Diffuse + specular
+		//float3 specular = float3(0.6f, 0.6f, 0.6f);
+		ray.origin = hit.position + hit.normal * 0.001f;
+		ray.direction = reflect(ray.direction, hit.normal);
+		ray.energy *= hit.specular;
+		
+		//float3 albedo = float3(0.8, 0.8, 0.8);
+		// Shadow ray test
+		bool inShadow = false;
+		Ray shadowRay = newRay(hit.position + hit.normal * 0.001, -lightDir);
+		HitRecord shadowHit = Trace(shadowRay);
+		
+		if (shadowHit.t < 9999)
+			return float3(0, 0, 0);
+		
+		return saturate(dot(hit.normal, -lightDir)) * lightIntensity * hit.albedo;
+        
+	} else {
+        // Sample the skybox and write it
+		ray.energy = 0;
+		
+	    float theta = acos(ray.direction.y) / -PI;
+	    float phi = atan2(ray.direction.x, -ray.direction.z) / -PI * 0.5f;
+		
+        return skyboxTex.SampleLevel(sampler_skyboxTex, float2(phi, theta), 0).xyz;
+	}
+}
+
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+    // Get the dimensions of the RenderTexture
+	uint width, height;
+	Result.GetDimensions(width, height);
+    
+    // Transform pixel to [-1,1] range
+	float2 uv = float2((id.xy + pixelOffset) / float2(width, height) * 2.0f - 1.0f);
+    
+    // Get a ray for the UVs
+	Ray ray = newCamRay(uv);
+
+    // Trace and shade
+	float3 color = float3(0, 0, 0);
+	for (int i = 0; i < numTrace; i++) {
+		HitRecord hit = Trace(ray);
+		color += Shade(ray, hit);// * ray.energy;
+	
+		if (!any(ray.energy))
+			break;
+	}
+    
+	Result[id.xy] = float4(color, 1);
+}
