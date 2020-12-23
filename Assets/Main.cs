@@ -14,6 +14,7 @@ public class Main : MonoBehaviour {
 
     private Camera camera;
     private RenderTexture target;
+    private RenderTexture converged;
 
     public Texture skyboxTex;
 
@@ -31,6 +32,8 @@ public class Main : MonoBehaviour {
     public float placementRadius = 100.0f;
     private ComputeBuffer sphereBuffer;
 
+    public int sphereSeed;
+
     private void OnEnable() {
         currSample = 0;
         SetupScene();
@@ -46,6 +49,8 @@ public class Main : MonoBehaviour {
     }
 
     private void SetupScene() {
+        Random.InitState(sphereSeed);
+
         List<Sphere> spheres = new List<Sphere>();
         
         // Add a number of random spheres
@@ -92,6 +97,7 @@ public class Main : MonoBehaviour {
         shader.SetMatrix("camInvProj", camera.projectionMatrix.inverse);
         shader.SetTexture(0, "skyboxTex", skyboxTex);
         shader.SetVector("pixelOffset", new Vector2(Random.value, Random.value));
+        shader.SetFloat("seed", Random.value);
         shader.SetVector("lightDir", directionalLight.transform.forward);
         shader.SetFloat("lightIntensity", directionalLight.intensity);
         shader.SetInt("numTrace", numTrace);
@@ -112,21 +118,29 @@ public class Main : MonoBehaviour {
         if (!addMaterial)
             addMaterial = new Material(Shader.Find("Hidden/AddShader"));
         addMaterial.SetFloat("_Sample", currSample);
-        Graphics.Blit(target, destination);
+        Graphics.Blit(target, converged, addMaterial);
+        Graphics.Blit(converged, destination);
         currSample++;
     }
 
     private void InitRenderTexture() {
         if (target == null || target.width != Screen.width || target.height != Screen.height) {
             // Release render texture if we already have one
-            if (target != null)
+            if (target != null) {
                 target.Release();
+                converged.Release();
+            }
 
             // Get a render target for Ray Tracing
             target = new RenderTexture(Screen.width, Screen.height, 0,
                 RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
             target.enableRandomWrite = true;
             target.Create();
+
+            converged = new RenderTexture(Screen.width, Screen.height, 0,
+                RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+            converged.enableRandomWrite = true;
+            converged.Create();
         }
     }
 

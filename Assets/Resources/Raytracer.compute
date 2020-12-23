@@ -40,6 +40,15 @@ float2 pixelOffset;
 
 int numTrace;
 
+float2 pixel;
+float seed;
+
+float rand() {
+	float res = frac(sin(seed / 100.0f * dot(pixel, float2(12.9898f, 78.233f))) * 43758.5453f);
+	seed += 1.0f;
+	return res;
+}
+
 Ray newRay(float3 origin, float3 direction) {
     Ray ray;
     ray.origin = origin;
@@ -81,8 +90,8 @@ void IntersectGroundPlane(Ray ray, inout HitRecord bestHit) {
 		bestHit.t = t;
 		bestHit.position = ray.origin + t * ray.direction;
 		bestHit.normal = float3(0.0f, 1.0f, 0.0f);
-		bestHit.albedo = float3(0.8, 0.8, 0.8);
-		bestHit.specular = float3(0.6, 0.6, 0.6);
+		bestHit.albedo = 0.8;
+		bestHit.specular = 0.6;
 	}
 }
 
@@ -119,26 +128,16 @@ HitRecord Trace(Ray ray) {
 	for (int i = 0; i < numSpheres; i++)
 		IntersectSphere(ray, bestHit, spheres[i]);
 	
-		//for (int x = 0; x < 10; x += 2) {
-		//	for (int z = 0; z < 10; z += 2) {
-		//		IntersectSphere(ray, bestHit, float4(x, 1, z, 1.0f));
-		//	}
-		//}
-	
-	//IntersectSphere(ray, bestHit, float4(0, 3.0f, 0, 1.0f));
-	
 	return bestHit;
 }
 
 float3 Shade(inout Ray ray, HitRecord hit) {
 	if (hit.t < 9999) {
-		// Diffuse + specular
-		//float3 specular = float3(0.6f, 0.6f, 0.6f);
+		// Reflect ray and multiplay energy with specular reflection
 		ray.origin = hit.position + hit.normal * 0.001f;
 		ray.direction = reflect(ray.direction, hit.normal);
 		ray.energy *= hit.specular;
 		
-		//float3 albedo = float3(0.8, 0.8, 0.8);
 		// Shadow ray test
 		bool inShadow = false;
 		Ray shadowRay = newRay(hit.position + hit.normal * 0.001, -lightDir);
@@ -156,12 +155,12 @@ float3 Shade(inout Ray ray, HitRecord hit) {
 	    float theta = acos(ray.direction.y) / -PI;
 	    float phi = atan2(ray.direction.x, -ray.direction.z) / -PI * 0.5f;
 		
-        return skyboxTex.SampleLevel(sampler_skyboxTex, float2(phi, theta), 0).xyz;
+        return skyboxTex.SampleLevel(sampler_skyboxTex, float2(phi, theta), 0).xyz * 1.8;
 	}
 }
 
 [numthreads(8,8,1)]
-void CSMain (uint3 id : SV_DispatchThreadID) {
+void CSMain (uint3 id : SV_DispatchThreadID) {	
     // Get the dimensions of the RenderTexture
 	uint width, height;
 	Result.GetDimensions(width, height);
@@ -169,6 +168,9 @@ void CSMain (uint3 id : SV_DispatchThreadID) {
     // Transform pixel to [-1,1] range
 	float2 uv = float2((id.xy + pixelOffset) / float2(width, height) * 2.0f - 1.0f);
     
+	// For the rand() function
+	pixel = id.xy;
+	
     // Get a ray for the UVs
 	Ray ray = newCamRay(uv);
 
@@ -176,7 +178,7 @@ void CSMain (uint3 id : SV_DispatchThreadID) {
 	float3 color = float3(0, 0, 0);
 	for (int i = 0; i < numTrace; i++) {
 		HitRecord hit = Trace(ray);
-		color += Shade(ray, hit);// * ray.energy;
+		color += ray.energy * Shade(ray, hit);
 	
 		if (!any(ray.energy))
 			break;

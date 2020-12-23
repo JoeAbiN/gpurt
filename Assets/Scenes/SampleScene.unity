@@ -479,9 +479,10 @@ MonoBehaviour:
   directionalLight: {fileID: 705507994}
   numTrace: 1
   text: {fileID: 1818168278}
-  radius: {x: 3, y: 8}
-  numSpheres: 100
+  radius: {x: 5, y: 30}
+  numSpheres: 10000
   placementRadius: 100
+  sphereSeed: 1223832719
 --- !u!114 &963194230
 MonoBehaviour:
   m_ObjectHideFlags: 0
