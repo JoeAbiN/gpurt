@@ -8,6 +8,8 @@ public class Main : MonoBehaviour {
         public float radius;
         public Vector3 albedo;
         public Vector3 specular;
+        public float smoothness;
+        public Vector3 emission;
     };
 
     public ComputeShader shader;
@@ -69,12 +71,14 @@ public class Main : MonoBehaviour {
                     goto SkipSphere;
             }
             
-            // Albedo and specular color
+            // Set shader properties
             Color color = Random.ColorHSV();
             bool metal = Random.value < 0.5f;
             sphere.albedo = metal ? Vector3.zero : new Vector3(color.r, color.g, color.b);
             sphere.specular = metal ? new Vector3(color.r, color.g, color.b) : Vector3.one * 0.04f;
-            
+            sphere.smoothness = Random.value;
+            sphere.emission = new Vector3(Random.value, Random.value, Random.value);
+
             // Add the sphere to the list
             spheres.Add(sphere);
         
@@ -83,7 +87,7 @@ public class Main : MonoBehaviour {
         }
 
         // Assign to compute buffer
-        sphereBuffer = new ComputeBuffer(spheres.Count, 40);
+        sphereBuffer = new ComputeBuffer(spheres.Count, 56);
         sphereBuffer.SetData(spheres);
     }
 
