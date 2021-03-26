@@ -1,11 +1,20 @@
 ﻿#pragma kernel CSMain
 
+// Constants
 static const float PI = 3.14159265f;
+static const float EPSILON = 1e-8;
 
+// Structs
 struct Ray {
 	float3 origin;
 	float3 direction;
-	float3 energy;
+	float3 radiance;
+};
+
+struct MeshObject {
+	float4x4 objMatrix;
+	int indicesOffset;
+	int indicesCount;
 };
 
 struct HitRecord {
@@ -38,7 +47,11 @@ SamplerState sampler_skyboxTex;
 float3 lightDir;
 float lightIntensity;
 
+// Buffers
 StructuredBuffer<Sphere> spheres;
+StructuredBuffer<MeshObject> meshObjects;
+StructuredBuffer<float3> vertices;
+StructuredBuffer<int> indices;
 
 float2 pixelOffset;
 
@@ -88,11 +101,12 @@ float smoothnessToAlpha(float s) {
 	return pow(1000, s * s);
 }
 
+// Constructors
 Ray newRay(float3 origin, float3 direction) {
     Ray ray;
     ray.origin = origin;
     ray.direction = direction;
-	ray.energy = float3(1, 1, 1);
+	ray.radiance = float3(1, 1, 1);
 	
 	return ray;
 }
@@ -124,6 +138,7 @@ Ray newCamRay(float2 uv) {
     return newRay(origin, direction);
 }
 
+// Intersectors
 void IntersectGroundPlane(Ray ray, inout HitRecord bestHit) {
     // Calculate distance along the ray where the ground plane is intersected
 	float t = -ray.origin.y / ray.direction.y;
@@ -160,18 +175,101 @@ void IntersectSphere(Ray ray, inout HitRecord bestHit, Sphere sphere) {
 	}
 }
 
-HitRecord Trace(Ray ray) {
+bool intersectTriangle(Ray ray, float3 v0, float3 v1, float3 v2, inout float t, inout float u, inout float v) {
+	// Compute edges
+	float3 edge1 = v1 - v0;
+	float3 edge2 = v2 - v0;
+	
+	// Begin computing determinant, also used to compute u
+	float3 pvec = cross(ray.direction, edge2);
+	
+	// If determinant close to 0, ray lies in triangle plane
+	float determinant = dot(edge1, pvec);
+	
+	// Backface culling
+	if (determinant < EPSILON)
+		return false;
+	float invDet = 1 / determinant;
+
+	// Compute distance from v0 to ray origin
+	float3 tvec = ray.origin - v0;
+	
+	// Compute u and test bounds
+	u = dot(tvec, pvec) * invDet;
+	if (u < 0 || u > 1)
+		return false;
+	
+	// Prepare to test v
+	float3 qvec = cross(tvec, edge1);
+	
+	// Compute v and test bounds
+	v = dot(ray.direction, qvec) * invDet;
+	if (v < 0 || u + v > 1)
+		return false;
+	
+	// Compute t, ray intersects triangle
+	t = dot(edge2, qvec) * invDet;
+	
+	return true;
+
+}
+
+void IntersectMeshObject(Ray ray, inout HitRecord bestHit, MeshObject meshObject) {
+	uint first = meshObject.indicesOffset;
+	uint last = first + meshObject.indicesCount;
+	for (uint i = first; i < last; i += 3) {
+		float3 v0 = mul(meshObject.objMatrix, float4(vertices[indices[i]], 1)).xyz;
+		float3 v1 = mul(meshObject.objMatrix, float4(vertices[indices[i + 1]], 1)).xyz;
+		float3 v2 = mul(meshObject.objMatrix, float4(vertices[indices[i + 2]], 1)).xyz;
+	
+		float t, u, v;
+		if (intersectTriangle(ray, v0, v1, v2, t, u, v)) {
+			if (t > 0 && t < bestHit.t) {
+				bestHit.t = t;
+				bestHit.position = ray.origin + t * ray.direction;
+				bestHit.normal = normalize(cross(v1 - v0, v2 - v0));
+				bestHit.albedo = 0.0f;
+				bestHit.specular = 0.65f;
+				bestHit.smoothness = 0.99f;
+				bestHit.emission = 0.0f;
+			}
+		}
+	}
+}
+
+HitRecord Trace(Ray ray){
 	HitRecord bestHit = newHitRecord();
+	uint count, stride, i;
 	
 	// Check plane intersection
 	IntersectGroundPlane(ray, bestHit);
 	
 	// Check spheres intersection
-	uint numSpheres, stride;
-	spheres.GetDimensions(numSpheres, stride);
-	
-	for (int i = 0; i < numSpheres; i++)
+	spheres.GetDimensions(count, stride);
+	for (i = 0; i < count; i++)
 		IntersectSphere(ray, bestHit, spheres[i]);
+	
+	// Check mesh objects intersetion
+	meshObjects.GetDimensions(count, stride);
+	for (i = 0; i < count; i++)
+		IntersectMeshObject(ray, bestHit, meshObjects[i]);
+	
+	// Check triangle intersection
+	//float3 v0 = float3(-150, 0, -150);
+	//float3 v1 = float3(150, 0, -150);
+	//float3 v2 = float3(0, 150 * sqrt(2), -150);
+	//float t, u, v;
+	//if (intersectTriangle(ray, v0, v1, v2, t, u, v)) {
+	//	if (t > 0 && t < bestHit.t) {
+	//		bestHit.t = t;
+	//		bestHit.position = ray.origin + t * ray.direction;
+	//		bestHit.normal = normalize(cross(v1 - v0, v2 - v0));
+	//		bestHit.albedo = 0.00f;
+	//		bestHit.specular = 0.65f * float3(1, 0.4f, 0.2f);
+	//		bestHit.smoothness = 0.9f;
+	//		bestHit.emission = 0.0f;
+	//	}
+	//}
 	
 	return bestHit;
 }
@@ -194,13 +292,13 @@ float3 Shade(inout Ray ray, HitRecord hit) {
 			float f = (alpha + 2) / (alpha + 1);
 			ray.origin = hit.position + hit.normal * 0.001f;
 			ray.direction = randInUnitHemisphere(reflect(ray.direction, hit.normal), alpha);
-			ray.energy *= (1 / specularChance) * hit.specular * sdot(hit.normal, ray.direction, f);
+			ray.radiance *= (1 / specularChance) * hit.specular * sdot(hit.normal, ray.direction, f);
 		
 		} else {
 			// Diffuse Lambert reflection
 			ray.origin = hit.position + hit.normal * 0.001f;
 			ray.direction = randInUnitHemisphere(hit.normal, 1);
-			ray.energy *= (1 / diffuseChance) * hit.albedo;// * 2 * hit.albedo * sdot(hit.normal, ray.direction);
+			ray.radiance *= (1 / diffuseChance) * hit.albedo;// * 2 * hit.albedo * sdot(hit.normal, ray.direction);
 		}
 		
 		return hit.emission;
@@ -218,14 +316,14 @@ float3 Shade(inout Ray ray, HitRecord hit) {
 		//float3 specular = hit.specular * (alpha + 2) * pow(sdot(ray.direction, reflected), alpha);
 		
 		//// Multiply by cosine
-		//ray.energy *= (diffuse + specular) * sdot(hit.normal, ray.direction);
+		//ray.radiance *= (diffuse + specular) * sdot(hit.normal, ray.direction);
 		
 		//return 0.0f;
 		
-		//// Reflect ray and multiplay energy with specular reflection
+		//// Reflect ray and multiplay radiance with specular reflection
 		//ray.origin = hit.position + hit.normal * 0.001f;
 		//ray.direction = reflect(ray.direction, hit.normal);
-		//ray.energy *= hit.specular;
+		//ray.radiance *= hit.specular;
 		
 		//// Shadow ray test
 		//bool inShadow = false;
@@ -239,7 +337,7 @@ float3 Shade(inout Ray ray, HitRecord hit) {
         
 	} else {
         // Sample the skybox and write it
-		ray.energy = 0;
+		ray.radiance = 0;
 		
 	    float theta = acos(ray.direction.y) / -PI;
 	    float phi = atan2(ray.direction.x, -ray.direction.z) / -PI * 0.5f;
@@ -267,9 +365,9 @@ void CSMain (uint3 id : SV_DispatchThreadID) {
 	float3 color = float3(0, 0, 0);
 	for (int i = 0; i < numTrace; i++) {
 		HitRecord hit = Trace(ray);
-		color += ray.energy * Shade(ray, hit);
+		color += ray.radiance * Shade(ray, hit);
 	
-		if (!any(ray.energy))
+		if (!any(ray.radiance))
 			break;
 	}
     
