@@ -52,6 +52,7 @@ StructuredBuffer<Sphere> spheres;
 StructuredBuffer<MeshObject> meshObjects;
 StructuredBuffer<float3> vertices;
 StructuredBuffer<int> indices;
+StructuredBuffer<float3> normals;
 
 float2 pixelOffset;
 
@@ -222,12 +223,17 @@ void IntersectMeshObject(Ray ray, inout HitRecord bestHit, MeshObject meshObject
 		float3 v1 = mul(meshObject.objMatrix, float4(vertices[indices[i + 1]], 1)).xyz;
 		float3 v2 = mul(meshObject.objMatrix, float4(vertices[indices[i + 2]], 1)).xyz;
 	
+		float3 n0 = normals[indices[i]];
+		float3 n1 = normals[indices[i + 1]];
+		float3 n2 = normals[indices[i + 2]];
+
 		float t, u, v;
 		if (intersectTriangle(ray, v0, v1, v2, t, u, v)) {
 			if (t > 0 && t < bestHit.t) {
 				bestHit.t = t;
 				bestHit.position = ray.origin + t * ray.direction;
-				bestHit.normal = normalize(cross(v1 - v0, v2 - v0));
+				// bestHit.normal = normalize(cross(v1 - v0, v2 - v0)); Flat shading
+				bestHit.normal = (1 - u - v) * n0 + u * n1 + v * n2; // Smooth shading
 				bestHit.albedo = 0.0f;
 				bestHit.specular = 0.65f;
 				bestHit.smoothness = 0.99f;

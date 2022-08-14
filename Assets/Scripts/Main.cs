@@ -46,10 +46,12 @@ public class Main : MonoBehaviour {
     private static List<MeshObject> meshObjects = new List<MeshObject>();
     private static List<Vector3> vertices = new List<Vector3>();
     private static List<int> indices = new List<int>();
+    private static List<Vector3> normals = new List<Vector3>();
 
     private ComputeBuffer meshObjectBuffer;
     private ComputeBuffer vertexBuffer;
     private ComputeBuffer indexBuffer;
+    private ComputeBuffer normalBuffer;
 
     // Some params
     public Texture skyboxTex;
@@ -142,6 +144,9 @@ public class Main : MonoBehaviour {
             int firstIndex = indices.Count;
             indices.AddRange(mesh.GetIndices(0).Select(index => index + firstVertex));
 
+            // Add normals data
+            normals.AddRange(mesh.normals);
+
             // Add mesh object data
             meshObjects.Add(new MeshObject() {
                 objMatrix = rayTracee.transform.localToWorldMatrix,
@@ -154,6 +159,7 @@ public class Main : MonoBehaviour {
         CreateComputeBuffer(ref meshObjectBuffer, meshObjects, 72);
         CreateComputeBuffer(ref vertexBuffer, vertices, 12);
         CreateComputeBuffer(ref indexBuffer, indices, 4);
+        CreateComputeBuffer(ref normalBuffer, normals, 12);
     }
 
     private void SetupScene() {
@@ -218,6 +224,7 @@ public class Main : MonoBehaviour {
         SetComputeBuffer("meshObjects", meshObjectBuffer);
         SetComputeBuffer("vertices", vertexBuffer);
         SetComputeBuffer("indices", indexBuffer);
+        SetComputeBuffer("normals", normalBuffer);
     }
 
     private void Render(RenderTexture destination) {
