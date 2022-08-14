@@ -2,6 +2,7 @@
 using System.Linq;
 using UnityEngine;
 using UnityEngine.UI;
+using BoundingVolume = RayTracee.BoundingVolume;
 
 public class Main : MonoBehaviour {
     struct Sphere {
@@ -17,12 +18,14 @@ public class Main : MonoBehaviour {
         public Matrix4x4 objMatrix;
         public int indicesOffset;
         public int indicesCount;
+        public Vector3 boundsMin;
+        public Vector3 boundsMax;
     }
 
     public ComputeShader shader;
 
     // Rendering
-    private Camera camera;
+    private new Camera camera;
     private RenderTexture target;
     private RenderTexture converged;
 
@@ -44,11 +47,13 @@ public class Main : MonoBehaviour {
     private static List<RayTracee> objs = new List<RayTracee>();
 
     private static List<MeshObject> meshObjects = new List<MeshObject>();
+    // private static List<BoundingVolume> boundingVolumes = new List<BoundingVolume>();
     private static List<Vector3> vertices = new List<Vector3>();
     private static List<int> indices = new List<int>();
     private static List<Vector3> normals = new List<Vector3>();
 
     private ComputeBuffer meshObjectBuffer;
+    // private ComputeBuffer boundingVolumeBuffer;
     private ComputeBuffer vertexBuffer;
     private ComputeBuffer indexBuffer;
     private ComputeBuffer normalBuffer;
@@ -77,6 +82,9 @@ public class Main : MonoBehaviour {
 
         if (indexBuffer != null)
             indexBuffer.Release();
+
+        if (normalBuffer != null)
+            normalBuffer.Release();
     }
 
     private void Awake() {
@@ -131,10 +139,11 @@ public class Main : MonoBehaviour {
         meshObjects.Clear();
         vertices.Clear();
         indices.Clear();
+        normals.Clear();
 
         // Get game objects data
         foreach (RayTracee rayTracee in objs) {
-            Mesh mesh = rayTracee.GetComponent<MeshFilter>().sharedMesh;
+            Mesh mesh = rayTracee.meshFilter.sharedMesh;
 
             // Add vertex data
             int firstVertex = vertices.Count;
@@ -151,12 +160,15 @@ public class Main : MonoBehaviour {
             meshObjects.Add(new MeshObject() {
                 objMatrix = rayTracee.transform.localToWorldMatrix,
                 indicesOffset = firstIndex,
-                indicesCount = mesh.GetIndices(0).Length
+                indicesCount = mesh.GetIndices(0).Length,
+                boundsMin = rayTracee.boundingVolume.min,
+                boundsMax = rayTracee.boundingVolume.max
             });
         }
 
         // Set up buffers
-        CreateComputeBuffer(ref meshObjectBuffer, meshObjects, 72);
+        CreateComputeBuffer(ref meshObjectBuffer, meshObjects, 96);
+        // CreateComputeBuffer(ref boundingVolumeBuffer, boundingVolumes, 24);
         CreateComputeBuffer(ref vertexBuffer, vertices, 12);
         CreateComputeBuffer(ref indexBuffer, indices, 4);
         CreateComputeBuffer(ref normalBuffer, normals, 12);

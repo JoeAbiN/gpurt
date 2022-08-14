@@ -15,6 +15,8 @@ struct MeshObject {
 	float4x4 objMatrix;
 	int indicesOffset;
 	int indicesCount;
+	float3 boundsMin;
+	float3 boundsMax;
 };
 
 struct HitRecord {
@@ -60,6 +62,12 @@ int numTrace;
 
 float2 pixel;
 float seed;
+
+void swap(inout float x, inout float y) {
+	float temp = y;
+	y = x;
+	x = temp;
+}
 
 float sdot(float3 x, float3 y, float f = 1.0f) {
 	return saturate(dot(x, y) * f);
@@ -176,6 +184,43 @@ void IntersectSphere(Ray ray, inout HitRecord bestHit, Sphere sphere) {
 	}
 }
 
+bool IntersectBox(Ray ray, float3 boundsMin, float3 boundsMax) {
+	float3 t0, t1, tMin, tMax;
+
+	t0.x = (boundsMin.x - ray.origin.x) / ray.direction.x;
+	t1.x = (boundsMax.x - ray.origin.x) / ray.direction.x;
+	if (t0.x > t1.x) swap(t0.x, t1.x);
+
+	t0.y = (boundsMin.y - ray.origin.y) / ray.direction.y;
+	t1.y = (boundsMax.y - ray.origin.y) / ray.direction.y;
+	if (t0.y > t1.y) swap(t0.y, t1.y);
+	
+	if (t0.x > t1.y || t0.y > t1.x)
+		return false;
+
+	if (t0.y > t0.x)
+		t0.x = t0.y;
+
+	if (t1.y < t1.x)
+		t1.x = t1.y;
+
+	t0.z = (boundsMin.z - ray.origin.z) / ray.direction.z;
+	t1.z = (boundsMax.z - ray.origin.z) / ray.direction.z;
+	
+	if (t0.z > t1.z) swap(t0.z, t1.z);
+
+	if (t0.x > t1.z || t0.z > t1.x)
+		return false;
+
+	if (t0.z > t0.x)
+		t0.x = t0.z;
+
+	if (t1.z < t1.x)
+		t1.x = t1.z;
+
+	return true;
+}
+
 bool intersectTriangle(Ray ray, float3 v0, float3 v1, float3 v2, inout float t, inout float u, inout float v) {
 	// Compute edges
 	float3 edge1 = v1 - v0;
@@ -258,7 +303,8 @@ HitRecord Trace(Ray ray){
 	// Check mesh objects intersetion
 	meshObjects.GetDimensions(count, stride);
 	for (i = 0; i < count; i++)
-		IntersectMeshObject(ray, bestHit, meshObjects[i]);
+		if (IntersectBox(ray, meshObjects[i].boundsMin, meshObjects[i].boundsMax))
+			IntersectMeshObject(ray, bestHit, meshObjects[i]);
 	
 	// Check triangle intersection
 	//float3 v0 = float3(-150, 0, -150);
